@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GKE Subnet Calculator</title>
+  <meta name="description" content="Calcolo del dimensionamento delle subnet per cluster GKE VPC-native, allineato alla documentazione ufficiale Google." />
+  <style>
+    :root {
+      --g-blue: #1a73e8;
+      --g-blue-dark: #1558b0;
+      --g-grey-50: #f8f9fa;
+      --g-grey-100: #f1f3f4;
+      --g-grey-300: #dadce0;
+      --g-grey-700: #5f6368;
+      --g-green: #1e8e3e;
+      --g-green-bg: #e6f4ea;
+      --g-yellow-bg: #fef7e0;
+      --g-red: #d93025;
+      --radius: 10px;
+      --shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      color: #202124;
+      background: var(--g-grey-50);
+      line-height: 1.5;
+    }
+    header {
+      background: var(--g-blue);
+      color: #fff;
+      padding: 20px 24px;
+      box-shadow: var(--shadow);
+    }
+    header h1 { margin: 0; font-size: 1.4rem; font-weight: 500; }
+    header p { margin: 4px 0 0; font-size: .85rem; opacity: .9; }
+    main {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 16px;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+    .card {
+      background: #fff;
+      border: 1px solid var(--g-grey-300);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+    .card h2 {
+      margin: 0 0 16px;
+      font-size: 1.05rem;
+      font-weight: 500;
+      color: var(--g-blue-dark);
+      border-bottom: 2px solid var(--g-grey-100);
+      padding-bottom: 8px;
+    }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: .85rem; color: var(--g-grey-700); margin-bottom: 4px; }
+    .field input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 1rem;
+      border: 1px solid var(--g-grey-300);
+      border-radius: 6px;
+      background: var(--g-yellow-bg);
+    }
+    .field input:focus { outline: 2px solid var(--g-blue); border-color: var(--g-blue); }
+    .field .hint { font-size: .75rem; color: var(--g-grey-700); margin-top: 4px; }
+    .field .error { font-size: .78rem; color: var(--g-red); margin-top: 4px; display: none; }
+    .field.invalid input { border-color: var(--g-red); background: #fce8e6; }
+    .field.invalid .error { display: block; }
+
+    .result-group { margin-bottom: 22px; }
+    .result-group h3 {
+      font-size: .95rem; font-weight: 500; margin: 0 0 10px;
+      color: #202124; display: flex; align-items: center; gap: 8px;
+    }
+    .result-group h3::before {
+      content: ""; width: 4px; height: 16px; background: var(--g-blue); border-radius: 2px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--g-grey-100); }
+    th { color: var(--g-grey-700); font-weight: 500; }
+    td.val { font-weight: 600; color: var(--g-blue-dark); font-variant-numeric: tabular-nums; }
+    td.cidr { font-family: "Roboto Mono", monospace; }
+    .badge {
+      display: inline-block; background: var(--g-green-bg); color: var(--g-green);
+      padding: 2px 8px; border-radius: 12px; font-size: .78rem; font-weight: 500;
+    }
+    .warn {
+      background: var(--g-yellow-bg); border-left: 4px solid #f9ab00;
+      padding: 10px 12px; border-radius: 6px; font-size: .85rem; margin: 10px 0;
+    }
+
+    /* Riquadro riepilogo: i CIDR da configurare (output principale) */
+    .summary {
+      background: linear-gradient(135deg, #e8f0fe 0%, #e6f4ea 100%);
+      border: 2px solid var(--g-blue);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin-bottom: 22px;
+    }
+    .summary-title {
+      font-size: .8rem; font-weight: 600; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--g-blue-dark); margin-bottom: 12px;
+    }
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    }
+    @media (max-width: 520px) { .summary-grid { grid-template-columns: 1fr 1fr; } }
+    .summary-item { display: flex; flex-direction: column; gap: 4px; }
+    .summary-item--sub { grid-column: 1 / -1; }
+    .summary-label { font-size: .78rem; color: var(--g-grey-700); }
+    .summary-cidr {
+      font-family: "Roboto Mono", monospace;
+      font-size: 1.6rem; font-weight: 700; line-height: 1.1;
+      color: var(--g-blue-dark);
+      background: #fff; border: 1px solid var(--g-grey-300); border-radius: 8px;
+      padding: 8px 12px; cursor: pointer; text-align: left;
+      transition: background .15s, border-color .15s, transform .05s;
+    }
+    .summary-cidr:hover { border-color: var(--g-blue); background: #f8fbff; }
+    .summary-cidr:active { transform: scale(.98); }
+    .summary-cidr.copied { background: var(--g-green-bg); border-color: var(--g-green); color: var(--g-green); }
+    .summary-cidr--sub { font-size: 1.15rem; display: inline-block; }
+    .summary-hint { font-size: .75rem; color: var(--g-grey-700); margin-top: 10px; }
+
+    /* Riga di dettaglio che riporta il CIDR consigliato */
+    tr.key-row td, tr.key-row th { background: var(--g-green-bg); }
+    tr.key-row td.val { color: var(--g-green); }
+    .ref-table th, .ref-table td { text-align: center; }
+    .ref-table .hl { background: var(--g-green-bg); font-weight: 600; }
+    details { margin-top: 12px; font-size: .88rem; }
+    details summary { cursor: pointer; color: var(--g-blue-dark); font-weight: 500; }
+    code { background: var(--g-grey-100); padding: 1px 5px; border-radius: 4px; font-size: .85em; }
+    footer { text-align: center; color: var(--g-grey-700); font-size: .78rem; padding: 24px 16px; }
+    footer a { color: var(--g-blue-dark); }
+    .formula { font-family: "Roboto Mono", monospace; font-size: .82rem; color: var(--g-grey-700); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GKE Subnet Calculator</h1>
+    <p>Dimensionamento delle subnet per cluster GKE VPC-native &mdash; formule ufficiali Google Kubernetes Engine</p>
+  </header>
+
+  <main>
+    <!-- INPUT -->
+    <section class="card" aria-label="Dati di input">
+      <h2>Dati di input</h2>
+
+      <div class="field" id="field-q">
+        <label for="q">Q &mdash; Max Pod per Nodo</label>
+        <input type="number" id="q" value="32" min="1" max="512" step="1" />
+        <div class="hint">Default GKE 110, massimo 512.</div>
+        <div class="error">Valore ammesso: da 1 a 512.</div>
+      </div>
+
+      <div class="field" id="field-nodes">
+        <label for="maxNodes">Max Nodi previsti (node pool)</label>
+        <input type="number" id="maxNodes" value="62" min="1" step="1" />
+        <div class="error">Inserisci un intero &ge; 1.</div>
+      </div>
+
+      <div class="field" id="field-surge">
+        <label for="surge">Max Surge (durante upgrade)</label>
+        <input type="number" id="surge" value="2" min="0" step="1" />
+        <div class="error">Inserisci un intero &ge; 0.</div>
+      </div>
+
+      <div class="field" id="field-lb">
+        <label for="lb">LoadBalancer interni</label>
+        <input type="number" id="lb" value="0" min="0" step="1" />
+        <div class="error">Inserisci un intero &ge; 0.</div>
+      </div>
+
+      <details>
+        <summary>Formule applicate</summary>
+        <p class="formula">
+          M = 31 &minus; &lceil;log&#8322;(Q)&rceil;<br />
+          HM = 32 &minus; M<br />
+          HD = 32 &minus; DS<br />
+          MN = 2^(HD &minus; HM)<br />
+          MP = MN &times; Q<br />
+          N = 2^(32 &minus; S) &minus; 4
+        </p>
+      </details>
+    </section>
+
+    <!-- RISULTATI -->
+    <section class="card" aria-label="Risultati">
+      <h2>Risultati del dimensionamento</h2>
+
+      <!-- RIEPILOGO EVIDENZIATO: i CIDR da configurare -->
+      <div class="summary" aria-label="CIDR consigliati">
+        <div class="summary-title">CIDR consigliati per il cluster</div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span class="summary-label">Subnet principale (nodi)</span>
+            <button class="summary-cidr" id="s-primary" title="Copia" data-copy>&mdash;</button>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Secondario Pod</span>
+            <button class="summary-cidr" id="s-pod" title="Copia" data-copy>&mdash;</button>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Secondario Service</span>
+            <button class="summary-cidr" id="s-svc" title="Copia" data-copy>&mdash;</button>
+          </div>
+          <div class="summary-item summary-item--sub">
+            <span class="summary-label">CIDR per nodo (M)</span>
+            <button class="summary-cidr summary-cidr--sub" id="s-pernode" title="Copia" data-copy>&mdash;</button>
+          </div>
+        </div>
+        <div class="summary-hint">Clicca un valore per copiarlo. I dettagli completi sono qui sotto.</div>
+      </div>
+
+      <div class="result-group">
+        <h3>Valori di base</h3>
+        <table>
+          <tr><th>Nodi cluster (nodi + surge)</th><td class="val" id="r-nodes"></td></tr>
+          <tr><th>Pod totali cluster (Nodi &times; Q)</th><td class="val" id="r-pods"></td></tr>
+        </table>
+      </div>
+
+      <div class="result-group">
+        <h3>Blocco alias-IP per nodo</h3>
+        <table>
+          <tr class="key-row"><th>M &mdash; CIDR per nodo</th><td class="val cidr" id="r-pernode-cidr"></td></tr>
+          <tr><th>Indirizzi IP per nodo</th><td class="val" id="r-pernode-ips"></td></tr>
+        </table>
+      </div>
+
+      <div class="result-group">
+        <h3>Subnet principale (nodi + LB interni)</h3>
+        <table>
+          <tr class="key-row"><th>S &mdash; Prefisso consigliato</th><td class="val cidr" id="r-primary-cidr"></td></tr>
+          <tr><th>N &mdash; IP utilizzabili (2^(32&minus;S)&minus;4)</th><td class="val" id="r-primary-usable"></td></tr>
+          <tr><th>IP richiesti (nodi + LB)</th><td class="val" id="r-primary-req"></td></tr>
+        </table>
+      </div>
+
+      <div class="result-group">
+        <h3>Intervallo secondario &mdash; Pod</h3>
+        <table>
+          <tr class="key-row"><th>DS &mdash; Prefisso consigliato</th><td class="val cidr" id="r-pod-cidr"></td></tr>
+          <tr><th>IP disponibili per i Pod</th><td class="val" id="r-pod-ips"></td></tr>
+          <tr><th>MN &mdash; Max nodi supportati</th><td class="val" id="r-pod-mn"></td></tr>
+          <tr><th>MP &mdash; Max Pod supportati</th><td class="val" id="r-pod-mp"></td></tr>
+        </table>
+        <div class="warn" id="pod-warn" style="display:none"></div>
+      </div>
+
+      <div class="result-group">
+        <h3>Intervallo secondario &mdash; Service (ClusterIP)</h3>
+        <table>
+          <tr class="key-row"><th>Prefisso consigliato (min /28)</th><td class="val cidr" id="r-svc-cidr"></td></tr>
+          <tr><th>IP disponibili (Service)</th><td class="val" id="r-svc-ips"></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- TABELLE DI RIFERIMENTO -->
+    <section class="card" style="grid-column: 1 / -1;" aria-label="Tabelle di riferimento">
+      <h2>Tabelle di riferimento</h2>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px;">
+        <div>
+          <div class="result-group">
+            <h3>Q &rarr; CIDR per nodo (ufficiale GKE)</h3>
+            <table class="ref-table" id="table-pernode">
+              <thead><tr><th>Max Pod per Nodo (Q)</th><th>CIDR per nodo</th><th>Indirizzi IP</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="result-group">
+            <h3>Intervallo Pod /DS &rarr; Max Nodi / Max Pod</h3>
+            <table class="ref-table" id="table-podrange">
+              <thead><tr><th>Prefisso (/DS)</th><th>IP totali</th><th>Max Nodi</th><th>Max Pod</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Formule e vincoli allineati alla
+    <a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/flexible-pod-cidr" target="_blank" rel="noopener">documentazione ufficiale GKE</a>.
+    App statica &mdash; nessun dato lascia il browser.
+  </footer>
+
+  <script src="calculator.js"></script>
+</body>
+</html>
